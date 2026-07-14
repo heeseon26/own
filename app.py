@@ -1,4 +1,36 @@
-<!DOCTYPE html>
+# -*- coding: utf-8 -*-
+import streamlit as st
+import streamlit.components.v1 as components
+
+st.set_page_config(
+    page_title="OWM Influencer Desk",
+    page_icon="🌿",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+# Streamlit 기본 여백과 상단 메뉴를 숨겨 웹앱처럼 보이게 합니다.
+st.markdown(
+    """
+    <style>
+        #MainMenu {visibility: hidden;}
+        header {visibility: hidden;}
+        footer {visibility: hidden;}
+        [data-testid="stToolbar"] {display: none;}
+        [data-testid="stDecoration"] {display: none;}
+        .block-container {
+            max-width: 100%;
+            padding: 0 !important;
+        }
+        iframe {
+            border: 0;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+OWM_HTML = r'''<!DOCTYPE html>
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
@@ -1204,4 +1236,10 @@ document.getElementById('sampleBtn').addEventListener('click',()=>{
 renderAll();
 </script>
 </body>
-</html>
+</html>'''
+
+components.html(
+    OWM_HTML,
+    height=1100,
+    scrolling=True,
+)
