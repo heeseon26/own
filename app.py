@@ -1,15 +1,11 @@
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
-import base64
-import hashlib
-import io
+import html
 import re
-import shutil
-import uuid
-from dataclasses import dataclass
-from datetime import date, datetime, time
-from pathlib import Path
-from typing import Any, Iterable
+from datetime import datetime
+from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
@@ -17,1138 +13,1079 @@ import streamlit as st
 try:
     import gspread
     from google.oauth2.service_account import Credentials
-except ImportError:  # 로컬에서 requirements 설치 전에도 파일을 열어볼 수 있도록 처리
+except ImportError:
     gspread = None
     Credentials = None
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
 # 기본 설정
-# ──────────────────────────────────────────────────────────────────────────────
-APP_TITLE = "OWM Influencer Desk"
-APP_SUBTITLE = "옵티마웰니스 신사점 인플루언서 통합 관리"
-BASE_DIR = Path(__file__).resolve().parent
-LOGO_PATH = BASE_DIR / "assets" / "owm_logo_transparent.png"
-LOCAL_DATA_PATH = BASE_DIR / "data" / "local_data.csv"
-SAMPLE_DATA_PATH = BASE_DIR / "sample_data.csv"
+# ─────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="OWM Influencer Desk",
+    page_icon="◡",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 
-COLUMNS = [
-    "record_id",
-    "협찬일",
-    "방문 시간",
-    "국가",
-    "계정주소",
-    "방문자명",
-    "연락처",
-    "촬영 유형/가이드",
-    "기프트",
-    "유료금액",
-    "비고",
+KST = ZoneInfo("Asia/Seoul")
+LOGO_B64 = "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"
+
+REQUIRED_RESPONSE_COLUMNS = [
     "기프트 수령",
+    "응대 완료",
     "응대직원",
-    "진행상태",
-    "등록경로",
-    "등록일시",
-    "최종수정일시",
+    "응대일시",
+    "응대메모",
 ]
-
-VISIBLE_COLUMNS = [
-    "협찬일",
-    "방문 시간",
-    "국가",
-    "방문자명",
-    "계정주소",
-    "연락처",
-    "촬영 유형/가이드",
-    "기프트",
-    "유료금액",
-    "진행상태",
-    "기프트 수령",
-    "응대직원",
-    "비고",
-]
-
-STATUS_OPTIONS = ["방문 예정", "촬영 진행", "촬영 완료", "취소"]
-SOURCE_OPTIONS = ["기존 명단", "카톡 공지", "현장 신규", "CSV 가져오기", "기타"]
-COUNTRY_OPTIONS = ["영어권", "중국", "일본", "대만", "홍콩", "러시아", "기타 국가", "미입력"]
 
 COLUMN_ALIASES = {
-    "협찬일": "협찬일",
-    "날짜": "협찬일",
-    "방문일": "협찬일",
-    "방문시간": "방문 시간",
-    "방문 시간": "방문 시간",
-    "국가": "국가",
-    "계정주소": "계정주소",
-    "계정 주소": "계정주소",
-    "인스타": "계정주소",
-    "인스타그램": "계정주소",
-    "방문자명": "방문자명",
-    "방문자 명": "방문자명",
-    "이름": "방문자명",
-    "연락처": "연락처",
-    "촬영유형선택/가이드": "촬영 유형/가이드",
-    "촬영 유형 선택/가이드": "촬영 유형/가이드",
-    "촬영유형/가이드": "촬영 유형/가이드",
-    "촬영 유형/가이드": "촬영 유형/가이드",
-    "촬영유형": "촬영 유형/가이드",
-    "가이드": "촬영 유형/가이드",
-    "기프트": "기프트",
-    "gift": "기프트",
-    "유료금액": "유료금액",
-    "유료 금액": "유료금액",
-    "금액": "유료금액",
-    "비고": "비고",
-    "메모": "비고",
-    "기프트수령": "기프트 수령",
-    "기프트 수령": "기프트 수령",
-    "응대직원": "응대직원",
-    "응대 직원": "응대직원",
-    "진행상태": "진행상태",
-    "진행 상태": "진행상태",
-    "등록경로": "등록경로",
-    "등록 경로": "등록경로",
+    "date": ["협찬일", "방문일", "날짜"],
+    "time": ["방문 시간", "방문시간", "시간"],
+    "country": ["국가", "언어권"],
+    "account": ["계정주소", "계정 주소", "SNS", "인스타그램", "인스타 주소"],
+    "name": ["방문자명", "인플루언서명", "이름"],
+    "phone": ["연락처", "전화번호", "휴대폰"],
+    "shoot": ["촬영 유형 선택/가이드", "촬영 유형", "촬영유형", "가이드"],
+    "gift": ["기프트", "증정 제품", "증정품"],
+    "amount": ["유료금액", "유료 금액", "금액"],
+    "note": ["비고", "메모", "주의사항"],
+    "gift_received": ["기프트 수령", "기프트수령"],
+    "responded": ["응대 완료", "응대완료"],
+    "staff": ["응대직원", "응대 직원"],
+    "responded_at": ["응대일시", "응대 일시"],
+    "response_note": ["응대메모", "응대 메모"],
 }
 
-st.set_page_config(
-    page_title=APP_TITLE,
-    page_icon="🎀",
-    layout="wide",
-    initial_sidebar_state="expanded",
+
+# ─────────────────────────────────────────────────────────────
+# 디자인
+# ─────────────────────────────────────────────────────────────
+st.markdown(
+    """
+    <style>
+        :root {
+            --owm-bg: #f4f1ec;
+            --owm-card: #ffffff;
+            --owm-ink: #222222;
+            --owm-muted: #77716a;
+            --owm-line: #e8e2da;
+            --owm-dark: #222222;
+            --owm-soft: #faf8f5;
+            --owm-pink: #d87996;
+            --owm-pink-soft: #fff0f4;
+            --owm-green: #66806c;
+        }
+
+        html, body, [class*="css"] {
+            font-family: Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI",
+                         "Noto Sans KR", sans-serif;
+        }
+
+        #MainMenu,
+        header,
+        footer,
+        [data-testid="stHeader"],
+        [data-testid="stToolbar"],
+        [data-testid="stDecoration"],
+        [data-testid="stStatusWidget"],
+        .stDeployButton {
+            display: none !important;
+            visibility: hidden !important;
+        }
+
+        [data-testid="stAppViewContainer"] {
+            background:
+                radial-gradient(circle at 88% 2%, rgba(216,121,150,.10), transparent 24rem),
+                var(--owm-bg);
+        }
+
+        [data-testid="stMain"] {
+            background: transparent;
+        }
+
+        .block-container {
+            max-width: 1180px;
+            padding: 2.2rem 2rem 5rem !important;
+        }
+
+        .owm-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .owm-brand {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .owm-logo-box {
+            width: 96px;
+            height: 72px;
+            padding: 12px 16px;
+            border-radius: 20px;
+            display: grid;
+            place-items: center;
+            background: var(--owm-dark);
+            box-shadow: 0 16px 38px rgba(34,34,34,.16);
+        }
+
+        .owm-logo-box img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .owm-title {
+            margin: 0;
+            color: var(--owm-ink);
+            font-size: 1.55rem;
+            line-height: 1.15;
+            letter-spacing: -.035em;
+            font-weight: 850;
+        }
+
+        .owm-subtitle {
+            margin-top: .35rem;
+            color: var(--owm-muted);
+            font-size: .82rem;
+            letter-spacing: .04em;
+        }
+
+        .owm-live {
+            display: inline-flex;
+            align-items: center;
+            gap: .48rem;
+            padding: .62rem .85rem;
+            border: 1px solid var(--owm-line);
+            border-radius: 999px;
+            background: rgba(255,255,255,.72);
+            color: var(--owm-muted);
+            font-size: .76rem;
+            font-weight: 750;
+            white-space: nowrap;
+            backdrop-filter: blur(10px);
+        }
+
+        .owm-live-dot {
+            width: .52rem;
+            height: .52rem;
+            border-radius: 50%;
+            background: var(--owm-green);
+            box-shadow: 0 0 0 4px rgba(102,128,108,.12);
+        }
+
+        .owm-hero {
+            padding: 2rem 2.1rem;
+            margin-bottom: 1rem;
+            border: 1px solid rgba(255,255,255,.7);
+            border-radius: 28px;
+            background:
+                linear-gradient(125deg, rgba(34,34,34,.98), rgba(48,46,44,.95));
+            color: white;
+            box-shadow: 0 24px 55px rgba(37,32,28,.13);
+        }
+
+        .owm-eyebrow {
+            color: #d9d3cc;
+            font-size: .74rem;
+            font-weight: 750;
+            letter-spacing: .15em;
+            text-transform: uppercase;
+        }
+
+        .owm-hero h1 {
+            margin: .7rem 0 .55rem;
+            color: white;
+            font-size: clamp(2rem, 4vw, 3.35rem);
+            line-height: 1.04;
+            letter-spacing: -.055em;
+            font-weight: 850;
+        }
+
+        .owm-hero p {
+            margin: 0;
+            max-width: 690px;
+            color: #d5d1cc;
+            font-size: .96rem;
+            line-height: 1.7;
+        }
+
+        .owm-metric-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0,1fr));
+            gap: 1rem;
+            margin: 1rem 0 1.5rem;
+        }
+
+        .owm-metric {
+            padding: 1.25rem 1.35rem;
+            border: 1px solid var(--owm-line);
+            border-radius: 22px;
+            background: rgba(255,255,255,.86);
+            box-shadow: 0 12px 34px rgba(38,32,28,.055);
+            backdrop-filter: blur(10px);
+        }
+
+        .owm-metric-label {
+            color: var(--owm-muted);
+            font-size: .76rem;
+            font-weight: 750;
+        }
+
+        .owm-metric-value {
+            margin-top: .45rem;
+            color: var(--owm-ink);
+            font-size: 2rem;
+            line-height: 1;
+            font-weight: 850;
+            letter-spacing: -.045em;
+        }
+
+        .owm-section-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: end;
+            gap: 1rem;
+            margin: 2rem 0 .9rem;
+        }
+
+        .owm-section-title {
+            color: var(--owm-ink);
+            font-size: 1.25rem;
+            font-weight: 850;
+            letter-spacing: -.03em;
+        }
+
+        .owm-section-copy {
+            margin-top: .28rem;
+            color: var(--owm-muted);
+            font-size: .82rem;
+        }
+
+        .owm-count {
+            color: var(--owm-muted);
+            font-size: .76rem;
+            font-weight: 700;
+        }
+
+        div[data-testid="stTextInput"] input {
+            min-height: 3.35rem;
+            padding: 0 1.05rem;
+            border: 1px solid var(--owm-line);
+            border-radius: 17px;
+            background: rgba(255,255,255,.92);
+            color: var(--owm-ink);
+            font-size: .98rem;
+            box-shadow: 0 10px 28px rgba(38,32,28,.045);
+        }
+
+        div[data-testid="stTextInput"] input:focus {
+            border-color: rgba(216,121,150,.75);
+            box-shadow: 0 0 0 4px rgba(216,121,150,.11);
+        }
+
+        [data-testid="stVerticalBlockBorderWrapper"] {
+            border: 1px solid var(--owm-line) !important;
+            border-radius: 24px !important;
+            background: rgba(255,255,255,.93) !important;
+            box-shadow: 0 13px 38px rgba(38,32,28,.055) !important;
+        }
+
+        [data-testid="stVerticalBlockBorderWrapper"] > div {
+            padding: .25rem !important;
+        }
+
+        .owm-visitor-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .owm-name {
+            color: var(--owm-ink);
+            font-size: 1.18rem;
+            font-weight: 850;
+            letter-spacing: -.025em;
+        }
+
+        .owm-account {
+            display: block;
+            max-width: 720px;
+            margin-top: .28rem;
+            overflow: hidden;
+            color: var(--owm-muted);
+            font-size: .8rem;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .owm-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: .42rem .68rem;
+            border-radius: 999px;
+            font-size: .7rem;
+            font-weight: 800;
+            white-space: nowrap;
+        }
+
+        .owm-badge.pending {
+            color: #8c5570;
+            background: var(--owm-pink-soft);
+        }
+
+        .owm-badge.done {
+            color: #4f7058;
+            background: #edf5ef;
+        }
+
+        .owm-detail-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0,1fr));
+            gap: .7rem;
+        }
+
+        .owm-detail {
+            min-width: 0;
+            padding: .82rem .9rem;
+            border-radius: 15px;
+            background: var(--owm-soft);
+        }
+
+        .owm-detail-label {
+            margin-bottom: .34rem;
+            color: #8b847d;
+            font-size: .68rem;
+            font-weight: 750;
+        }
+
+        .owm-detail-value {
+            overflow: hidden;
+            color: #3b3835;
+            font-size: .82rem;
+            font-weight: 720;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .owm-note {
+            margin-top: .75rem;
+            padding: .85rem .95rem;
+            border-radius: 15px;
+            background: #fff7f9;
+            color: #744d5b;
+            font-size: .79rem;
+            line-height: 1.6;
+        }
+
+        .owm-done-strip {
+            margin-top: .8rem;
+            padding: .82rem .95rem;
+            border: 1px solid #dfeae2;
+            border-radius: 15px;
+            background: #f3f8f4;
+            color: #516b57;
+            font-size: .78rem;
+            line-height: 1.55;
+        }
+
+        .owm-empty {
+            padding: 3.2rem 1.5rem;
+            border: 1px dashed #d7cfc5;
+            border-radius: 24px;
+            background: rgba(255,255,255,.58);
+            color: var(--owm-muted);
+            text-align: center;
+        }
+
+        .owm-empty-mark {
+            width: 44px;
+            height: 44px;
+            display: grid;
+            place-items: center;
+            margin: 0 auto .8rem;
+            border-radius: 14px;
+            background: var(--owm-pink-soft);
+            color: var(--owm-pink);
+            font-size: 1.25rem;
+            font-weight: 850;
+        }
+
+        .owm-empty strong {
+            display: block;
+            margin-bottom: .35rem;
+            color: var(--owm-ink);
+            font-size: .96rem;
+        }
+
+        div.stButton > button {
+            min-height: 2.9rem;
+            border-radius: 14px;
+            border: 1px solid var(--owm-line);
+            font-weight: 800;
+            transition: transform .15s ease, box-shadow .15s ease;
+        }
+
+        div.stButton > button:hover {
+            transform: translateY(-1px);
+            border-color: #d8cfc5;
+            box-shadow: 0 9px 20px rgba(38,32,28,.08);
+        }
+
+        div.stButton > button[kind="primary"] {
+            border-color: var(--owm-dark);
+            background: var(--owm-dark);
+            color: white;
+        }
+
+        div[data-testid="stCheckbox"] label p,
+        div[data-testid="stTextArea"] label p,
+        div[data-testid="stTextInput"] label p {
+            color: #5c5752;
+            font-size: .79rem;
+            font-weight: 750;
+        }
+
+        div[data-testid="stTextArea"] textarea {
+            border: 1px solid var(--owm-line);
+            border-radius: 14px;
+        }
+
+        div[role="dialog"] {
+            border-radius: 24px !important;
+        }
+
+        .owm-footer {
+            margin-top: 2.5rem;
+            color: #9a938b;
+            font-size: .7rem;
+            text-align: center;
+        }
+
+        @media (max-width: 900px) {
+            .block-container {
+                padding: 1.35rem 1rem 3.5rem !important;
+            }
+
+            .owm-header {
+                align-items: flex-start;
+            }
+
+            .owm-logo-box {
+                width: 82px;
+                height: 62px;
+            }
+
+            .owm-metric-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .owm-detail-grid {
+                grid-template-columns: repeat(2, minmax(0,1fr));
+            }
+        }
+
+        @media (max-width: 600px) {
+            .owm-header {
+                flex-direction: column;
+            }
+
+            .owm-hero {
+                padding: 1.55rem 1.35rem;
+                border-radius: 22px;
+            }
+
+            .owm-detail-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .owm-visitor-top {
+                flex-direction: column;
+            }
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# 스타일
-# ──────────────────────────────────────────────────────────────────────────────
-def get_logo_data_uri() -> str:
-    if not LOGO_PATH.exists():
-        return ""
-    encoded = base64.b64encode(LOGO_PATH.read_bytes()).decode("utf-8")
-    return f"data:image/png;base64,{encoded}"
-
-
-def inject_css() -> None:
-    st.markdown(
-        """
-        <style>
-        :root {
-            --owm-dark: #232323;
-            --owm-ink: #282522;
-            --owm-muted: #77716b;
-            --owm-pink: #d987a3;
-            --owm-pink-soft: #fff0f5;
-            --owm-cream: #f6f1eb;
-            --owm-line: #ebe3dc;
-        }
-        .stApp { background: var(--owm-cream); }
-        [data-testid="stSidebar"] { background: #222222; }
-        [data-testid="stSidebar"] * { color: #f7f7f7; }
-        [data-testid="stSidebar"] .stAlert * { color: #282522; }
-        [data-testid="stSidebar"] hr { border-color: rgba(255,255,255,.15); }
-        .block-container { padding-top: 1.6rem; padding-bottom: 4rem; max-width: 1500px; }
-        .owm-hero {
-            background: linear-gradient(135deg, #232323 0%, #32302f 70%, #4a3a40 100%);
-            border-radius: 26px;
-            padding: 22px 28px;
-            color: white;
-            display: flex;
-            align-items: center;
-            gap: 20px;
-            box-shadow: 0 16px 45px rgba(44, 36, 34, .14);
-            margin-bottom: 18px;
-        }
-        .owm-hero img { width: 105px; height: 76px; object-fit: contain; }
-        .owm-hero h1 { margin: 0; font-size: 2rem; letter-spacing: -.04em; }
-        .owm-hero p { margin: 7px 0 0; color: #ded8d5; font-size: .95rem; }
-        .owm-card {
-            background: rgba(255,255,255,.93);
-            border: 1px solid var(--owm-line);
-            border-radius: 20px;
-            padding: 18px 20px;
-            box-shadow: 0 10px 32px rgba(50, 39, 34, .06);
-            margin-bottom: 14px;
-        }
-        .owm-card h3 { margin: 0 0 7px; font-size: 1.05rem; }
-        .owm-card p { margin: 0; color: var(--owm-muted); }
-        .owm-pill {
-            display: inline-block;
-            padding: 5px 10px;
-            border-radius: 999px;
-            background: var(--owm-pink-soft);
-            color: #a74e70;
-            font-size: .78rem;
-            font-weight: 750;
-            margin: 2px 5px 2px 0;
-        }
-        .owm-muted { color: var(--owm-muted); font-size: .9rem; }
-        .owm-result-title { font-size: 1.25rem; font-weight: 800; margin-bottom: 3px; }
-        .owm-link { color: #a74e70 !important; text-decoration: none; font-weight: 700; }
-        div[data-testid="stMetric"] {
-            background: white;
-            border: 1px solid var(--owm-line);
-            padding: 14px 16px;
-            border-radius: 18px;
-            box-shadow: 0 8px 24px rgba(50, 39, 34, .05);
-        }
-        div[data-testid="stMetricLabel"] { color: var(--owm-muted); }
-        .stButton > button, .stDownloadButton > button {
-            border-radius: 12px;
-            font-weight: 750;
-            min-height: 42px;
-        }
-        .stButton > button[kind="primary"] {
-            background: #282522;
-            border-color: #282522;
-        }
-        .stTextInput input, .stTextArea textarea, .stSelectbox div[data-baseweb="select"] > div,
-        .stNumberInput input, .stDateInput input, .stTimeInput input {
-            border-radius: 12px !important;
-        }
-        div[data-testid="stDataFrame"] { border-radius: 16px; overflow: hidden; }
-        [data-testid="stTabs"] button { font-weight: 750; }
-        @media (max-width: 800px) {
-            .owm-hero { padding: 18px; }
-            .owm-hero img { width: 70px; height: 52px; }
-            .owm-hero h1 { font-size: 1.45rem; }
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-inject_css()
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# 공통 유틸리티
-# ──────────────────────────────────────────────────────────────────────────────
-def now_text() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def clean_text(value: Any) -> str:
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        return ""
-    return str(value).strip()
-
-
-def to_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    return clean_text(value).lower() in {"true", "1", "yes", "y", "완료", "수령", "o", "⭕", "체크"}
-
-
-def normalize_date(value: Any) -> str:
-    text = clean_text(value)
-    if not text:
-        return ""
-    parsed = pd.to_datetime(text, errors="coerce")
-    if pd.isna(parsed):
-        return text
-    return parsed.strftime("%Y-%m-%d")
-
-
-def normalize_time(value: Any) -> str:
-    text = clean_text(value)
-    if not text:
-        return ""
-    parsed = pd.to_datetime(text, errors="coerce")
-    if pd.isna(parsed):
-        return text
-    return parsed.strftime("%H:%M")
-
-
-def normalize_money(value: Any) -> int:
-    text = re.sub(r"[^0-9.-]", "", clean_text(value))
-    if not text:
-        return 0
+# ─────────────────────────────────────────────────────────────
+# 데이터 연결
+# ─────────────────────────────────────────────────────────────
+def has_sheet_config() -> bool:
     try:
-        return int(float(text))
-    except ValueError:
-        return 0
-
-
-def format_money(value: Any) -> str:
-    amount = normalize_money(value)
-    return f"₩{amount:,}" if amount else "-"
-
-
-def normalize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    output = df.copy()
-    for column in COLUMNS:
-        if column not in output.columns:
-            output[column] = ""
-    output = output[COLUMNS]
-    output = output.fillna("")
-    output["협찬일"] = output["협찬일"].map(normalize_date)
-    output["방문 시간"] = output["방문 시간"].map(normalize_time)
-    output["기프트 수령"] = output["기프트 수령"].map(to_bool)
-    output["유료금액"] = output["유료금액"].map(normalize_money)
-    output["진행상태"] = output["진행상태"].map(lambda x: clean_text(x) or "방문 예정")
-    return output
-
-
-def csv_bytes(df: pd.DataFrame) -> bytes:
-    return df.to_csv(index=False).encode("utf-8-sig")
-
-
-def account_href(account: str) -> str:
-    account = clean_text(account)
-    if not account:
-        return ""
-    if account.startswith(("http://", "https://")):
-        return account
-    if account.startswith("@"):
-        return f"https://www.instagram.com/{account[1:]}/"
-    return ""
-
-
-def make_record_id() -> str:
-    return uuid.uuid4().hex[:12]
-
-
-def ensure_unique_record_ids(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    seen: set[str] = set()
-    for idx in df.index:
-        rid = clean_text(df.at[idx, "record_id"])
-        if not rid or rid in seen:
-            rid = make_record_id()
-            df.at[idx, "record_id"] = rid
-        seen.add(rid)
-    return df
-
-
-def dataframe_for_display(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
-        return pd.DataFrame(columns=VISIBLE_COLUMNS)
-    display = df[VISIBLE_COLUMNS].copy()
-    display["유료금액"] = display["유료금액"].map(format_money)
-    display["기프트 수령"] = display["기프트 수령"].map(lambda x: "⭕" if to_bool(x) else "")
-    return display
-
-
-def normalize_header(text: Any) -> str:
-    value = re.sub(r"\s+", " ", clean_text(text)).strip()
-    compact = value.replace(" ", "")
-    return COLUMN_ALIASES.get(value, COLUMN_ALIASES.get(compact, value))
-
-
-def import_dataframe(raw_df: pd.DataFrame) -> pd.DataFrame:
-    renamed = raw_df.copy()
-    renamed.columns = [normalize_header(column) for column in renamed.columns]
-    # 중복 열이 생기면 첫 번째 비어 있지 않은 값을 사용
-    if renamed.columns.duplicated().any():
-        merged: dict[str, pd.Series] = {}
-        for column in dict.fromkeys(renamed.columns):
-            same = renamed.loc[:, renamed.columns == column]
-            merged[column] = same.replace("", pd.NA).bfill(axis=1).iloc[:, 0].fillna("")
-        renamed = pd.DataFrame(merged)
-
-    now = now_text()
-    result = pd.DataFrame(index=renamed.index)
-    for column in COLUMNS:
-        result[column] = renamed[column] if column in renamed.columns else ""
-    result["record_id"] = result["record_id"].map(clean_text)
-    result["record_id"] = result["record_id"].map(lambda x: x or make_record_id())
-    result["등록경로"] = result["등록경로"].map(lambda x: clean_text(x) or "CSV 가져오기")
-    result["진행상태"] = result["진행상태"].map(lambda x: clean_text(x) or "방문 예정")
-    result["등록일시"] = result["등록일시"].map(lambda x: clean_text(x) or now)
-    result["최종수정일시"] = result["최종수정일시"].map(lambda x: clean_text(x) or now)
-    return ensure_unique_record_ids(normalize_dataframe(result))
-
-
-def safe_rerun() -> None:
-    st.rerun()
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# 저장소: Google Sheets 또는 로컬 CSV
-# ──────────────────────────────────────────────────────────────────────────────
-class StorageError(RuntimeError):
-    pass
-
-
-@dataclass
-class BackendInfo:
-    mode: str
-    label: str
-    detail: str
-
-
-def secret_value(section: str, key: str, default: Any = None) -> Any:
-    try:
-        section_data = st.secrets.get(section, {})
-        return section_data.get(key, default)
-    except Exception:
-        return default
-
-
-def has_google_secrets() -> bool:
-    try:
-        service_info = st.secrets.get("gcp_service_account", {})
-        spreadsheet_id = secret_value("app", "spreadsheet_id", "")
-        return bool(service_info and spreadsheet_id)
+        return (
+            "gcp_service_account" in st.secrets
+            and "sheet" in st.secrets
+            and bool(st.secrets["sheet"].get("spreadsheet_id"))
+        )
     except Exception:
         return False
 
 
-def column_letter(number: int) -> str:
-    result = ""
-    while number:
-        number, remainder = divmod(number - 1, 26)
-        result = chr(65 + remainder) + result
-    return result
-
-
 @st.cache_resource(show_spinner=False)
-def google_worksheet():
+def get_worksheet():
+    if not has_sheet_config():
+        return None
+
     if gspread is None or Credentials is None:
-        raise StorageError("Google Sheets 패키지가 설치되지 않았습니다. requirements.txt를 확인하세요.")
-    try:
-        info = dict(st.secrets["gcp_service_account"])
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive",
-        ]
-        credentials = Credentials.from_service_account_info(info, scopes=scopes)
-        client = gspread.authorize(credentials)
-        spreadsheet = client.open_by_key(str(st.secrets["app"]["spreadsheet_id"]))
-        worksheet_name = secret_value("app", "worksheet_name", "OWM_통합관리")
+        raise RuntimeError("Google Sheets 연결 패키지가 설치되지 않았습니다.")
+
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    credentials = Credentials.from_service_account_info(
+        dict(st.secrets["gcp_service_account"]),
+        scopes=scopes,
+    )
+    client = gspread.authorize(credentials)
+
+    sheet_id = st.secrets["sheet"]["spreadsheet_id"]
+    worksheet_name = st.secrets["sheet"].get("worksheet_name", "인플루언서")
+    return client.open_by_key(sheet_id).worksheet(worksheet_name)
+
+
+def ensure_response_columns(worksheet) -> list[str]:
+    headers = [str(v).strip() for v in worksheet.row_values(1)]
+    missing = [name for name in REQUIRED_RESPONSE_COLUMNS if name not in headers]
+
+    if missing:
+        headers.extend(missing)
+        worksheet.update(range_name="A1", values=[headers])
+
+    return headers
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def load_sheet_records() -> pd.DataFrame:
+    worksheet = get_worksheet()
+    if worksheet is None:
+        return pd.DataFrame()
+
+    headers = ensure_response_columns(worksheet)
+    values = worksheet.get_all_values()
+
+    if len(values) <= 1:
+        return pd.DataFrame(columns=headers + ["_sheet_row"])
+
+    rows = []
+    for raw_row in values[1:]:
+        padded = raw_row + [""] * max(0, len(headers) - len(raw_row))
+        rows.append(padded[: len(headers)])
+
+    frame = pd.DataFrame(rows, columns=headers)
+    frame["_sheet_row"] = range(2, len(frame) + 2)
+    return frame
+
+
+def preview_records() -> pd.DataFrame:
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+    rows = [
+        {
+            "협찬일": today,
+            "방문 시간": "14:00",
+            "국가": "영어권",
+            "계정주소": "https://www.instagram.com/owm_preview",
+            "방문자명": "OWM Preview",
+            "연락처": "010-0000-0000",
+            "촬영 유형 선택/가이드": "에피미러 X OWM",
+            "기프트": "REJU-ECTO · JUVE-ECTO",
+            "유료금액": "450000",
+            "비고": "구글시트 연결 전 화면 확인용 예시입니다.",
+            "기프트 수령": "",
+            "응대 완료": "",
+            "응대직원": "",
+            "응대일시": "",
+            "응대메모": "",
+            "_sheet_row": 2,
+        },
+        {
+            "협찬일": today,
+            "방문 시간": "16:30",
+            "국가": "중국",
+            "계정주소": "https://www.instagram.com/owm_guest",
+            "방문자명": "Guest Creator",
+            "연락처": "010-1111-2222",
+            "촬영 유형 선택/가이드": "레비오 X OWM",
+            "기프트": "PDRN 크림",
+            "유료금액": "",
+            "비고": "",
+            "기프트 수령": "TRUE",
+            "응대 완료": "TRUE",
+            "응대직원": "직원 예시",
+            "응대일시": f"{today} 11:20",
+            "응대메모": "",
+            "_sheet_row": 3,
+        },
+    ]
+    return pd.DataFrame(rows)
+
+
+def get_records() -> tuple[pd.DataFrame, bool, str]:
+    if has_sheet_config():
         try:
-            worksheet = spreadsheet.worksheet(worksheet_name)
-        except gspread.WorksheetNotFound:
-            worksheet = spreadsheet.add_worksheet(
-                title=worksheet_name,
-                rows=2000,
-                cols=max(20, len(COLUMNS)),
-            )
-        initialize_google_worksheet(worksheet)
-        return worksheet
-    except Exception as exc:
-        raise StorageError(f"Google Sheets 연결 실패: {exc}") from exc
+            return load_sheet_records(), True, ""
+        except Exception as exc:
+            return pd.DataFrame(), False, str(exc)
+
+    if "preview_df" not in st.session_state:
+        st.session_state.preview_df = preview_records()
+
+    return st.session_state.preview_df.copy(), False, ""
 
 
-def initialize_google_worksheet(worksheet) -> None:
-    values = worksheet.get_all_values()
-    headers = [clean_text(item) for item in values[0]] if values else []
+def resolve_columns(columns: list[str]) -> dict[str, str | None]:
+    resolved: dict[str, str | None] = {}
+    normalized = {str(col).strip(): str(col) for col in columns}
 
-    if not headers:
-        worksheet.update([COLUMNS], "A1", value_input_option="RAW")
-    elif headers != COLUMNS:
-        # 기존 형식의 열을 발견하면 앱 표준 열로 안전하게 재정렬합니다.
-        rows = values[1:]
-        width = len(headers)
-        padded_rows = [row[:width] + [""] * max(0, width - len(row)) for row in rows]
-        migrated = import_dataframe(pd.DataFrame(padded_rows, columns=headers)) if rows else pd.DataFrame(columns=COLUMNS)
-        worksheet.clear()
-        matrix = [COLUMNS]
-        if not migrated.empty:
-            matrix.extend(
-                [
-                    [serialize_sheet_value(record.get(column, "")) for column in COLUMNS]
-                    for record in migrated.to_dict("records")
-                ]
-            )
-        worksheet.update(matrix, "A1", value_input_option="USER_ENTERED")
-    try:
-        worksheet.freeze(rows=1)
-        last = column_letter(len(COLUMNS))
-        worksheet.format(
-            f"A1:{last}1",
-            {
-                "backgroundColor": {"red": 0.15, "green": 0.15, "blue": 0.15},
-                "textFormat": {"foregroundColor": {"red": 1, "green": 1, "blue": 1}, "bold": True},
-                "horizontalAlignment": "CENTER",
-            },
+    for key, aliases in COLUMN_ALIASES.items():
+        resolved[key] = next(
+            (normalized[alias] for alias in aliases if alias in normalized),
+            None,
         )
-        worksheet.set_basic_filter(f"A1:{last}")
-    except Exception:
-        # 서식 적용 권한/쿼터 문제가 있어도 데이터 기능은 계속 사용
-        pass
+
+    return resolved
 
 
-def load_google_data() -> pd.DataFrame:
-    worksheet = google_worksheet()
-    values = worksheet.get_all_values()
-    if not values:
-        return pd.DataFrame(columns=COLUMNS)
-    header = [clean_text(item) for item in values[0]]
-    rows = values[1:]
-    if not rows:
-        return pd.DataFrame(columns=COLUMNS)
-    width = len(header)
-    padded_rows = [row[:width] + [""] * max(0, width - len(row)) for row in rows]
-    df = pd.DataFrame(padded_rows, columns=header)
-    return normalize_dataframe(df)
-
-
-def find_google_row(record_id: str) -> int:
-    worksheet = google_worksheet()
-    ids = worksheet.col_values(1)
-    for index, value in enumerate(ids[1:], start=2):
-        if clean_text(value) == record_id:
-            return index
-    raise StorageError("수정할 기록을 찾지 못했습니다. 새로고침 후 다시 시도해주세요.")
-
-
-def add_google_record(record: dict[str, Any]) -> None:
-    row = [serialize_sheet_value(record.get(column, "")) for column in COLUMNS]
-    google_worksheet().append_row(row, value_input_option="USER_ENTERED")
-
-
-def add_google_records(records: Iterable[dict[str, Any]]) -> None:
-    rows = [[serialize_sheet_value(record.get(column, "")) for column in COLUMNS] for record in records]
-    if rows:
-        google_worksheet().append_rows(rows, value_input_option="USER_ENTERED")
-
-
-def update_google_record(record_id: str, record: dict[str, Any]) -> None:
-    worksheet = google_worksheet()
-    row_index = find_google_row(record_id)
-    values = [[serialize_sheet_value(record.get(column, "")) for column in COLUMNS]]
-    last = column_letter(len(COLUMNS))
-    worksheet.update(values, f"A{row_index}:{last}{row_index}", value_input_option="USER_ENTERED")
-
-
-def delete_google_record(record_id: str) -> None:
-    row_index = find_google_row(record_id)
-    google_worksheet().delete_rows(row_index)
-
-
-def serialize_sheet_value(value: Any) -> Any:
-    if isinstance(value, bool):
-        return "TRUE" if value else "FALSE"
-    if value is None or (isinstance(value, float) and pd.isna(value)):
+def value_of(row: pd.Series, columns: dict[str, str | None], key: str) -> str:
+    column = columns.get(key)
+    if not column:
         return ""
-    return value
+
+    value = row.get(column, "")
+    if pd.isna(value):
+        return ""
+
+    return str(value).strip()
 
 
-def initialize_local_data() -> None:
-    LOCAL_DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
-    if LOCAL_DATA_PATH.exists():
-        return
-    if SAMPLE_DATA_PATH.exists():
-        shutil.copy2(SAMPLE_DATA_PATH, LOCAL_DATA_PATH)
-    else:
-        pd.DataFrame(columns=COLUMNS).to_csv(LOCAL_DATA_PATH, index=False, encoding="utf-8-sig")
-
-
-def load_local_data() -> pd.DataFrame:
-    initialize_local_data()
-    try:
-        return normalize_dataframe(pd.read_csv(LOCAL_DATA_PATH, dtype=str).fillna(""))
-    except pd.errors.EmptyDataError:
-        return pd.DataFrame(columns=COLUMNS)
-
-
-def write_local_data(df: pd.DataFrame) -> None:
-    normalize_dataframe(df).to_csv(LOCAL_DATA_PATH, index=False, encoding="utf-8-sig")
-
-
-def add_local_record(record: dict[str, Any]) -> None:
-    df = load_local_data()
-    df = pd.concat([df, pd.DataFrame([record])], ignore_index=True)
-    write_local_data(df)
-
-
-def add_local_records(records: Iterable[dict[str, Any]]) -> None:
-    records = list(records)
-    if not records:
-        return
-    df = load_local_data()
-    df = pd.concat([df, pd.DataFrame(records)], ignore_index=True)
-    write_local_data(df)
-
-
-def update_local_record(record_id: str, record: dict[str, Any]) -> None:
-    df = load_local_data()
-    matches = df.index[df["record_id"].astype(str) == record_id]
-    if len(matches) == 0:
-        raise StorageError("수정할 기록을 찾지 못했습니다.")
-    for column in COLUMNS:
-        df.at[matches[0], column] = record.get(column, "")
-    write_local_data(df)
-
-
-def delete_local_record(record_id: str) -> None:
-    df = load_local_data()
-    df = df[df["record_id"].astype(str) != record_id]
-    write_local_data(df)
-
-
-def backend_info() -> BackendInfo:
-    if has_google_secrets():
-        return BackendInfo("google", "Google Sheets 연결", "여러 컴퓨터가 같은 데이터를 사용합니다.")
-    return BackendInfo("local", "로컬 미리보기", "이 컴퓨터의 CSV에만 저장됩니다. 배포 전 Google Sheets 연결이 필요합니다.")
-
-
-def load_data() -> pd.DataFrame:
-    return load_google_data() if backend_info().mode == "google" else load_local_data()
-
-
-def add_record(record: dict[str, Any]) -> None:
-    if backend_info().mode == "google":
-        add_google_record(record)
-    else:
-        add_local_record(record)
-
-
-def add_records(records: Iterable[dict[str, Any]]) -> None:
-    if backend_info().mode == "google":
-        add_google_records(records)
-    else:
-        add_local_records(records)
-
-
-def update_record(record_id: str, record: dict[str, Any]) -> None:
-    if backend_info().mode == "google":
-        update_google_record(record_id, record)
-    else:
-        update_local_record(record_id, record)
-
-
-def delete_record(record_id: str) -> None:
-    if backend_info().mode == "google":
-        delete_google_record(record_id)
-    else:
-        delete_local_record(record_id)
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# 로그인
-# ──────────────────────────────────────────────────────────────────────────────
-def password_gate() -> None:
-    configured_password = clean_text(secret_value("app", "app_password", ""))
-    if not configured_password:
-        return
-    password_hash = hashlib.sha256(configured_password.encode("utf-8")).hexdigest()
-    if st.session_state.get("authenticated_hash") == password_hash:
-        return
-
-    logo_uri = get_logo_data_uri()
-    st.markdown(
-        f"""
-        <div class="owm-hero">
-            <img src="{logo_uri}" alt="OWM logo">
-            <div><h1>{APP_TITLE}</h1><p>직원용 관리 페이지입니다.</p></div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    with st.form("login_form"):
-        password = st.text_input("접속 비밀번호", type="password", placeholder="비밀번호 입력")
-        submitted = st.form_submit_button("로그인", type="primary", use_container_width=True)
-    if submitted:
-        attempted_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
-        if attempted_hash == password_hash:
-            st.session_state["authenticated_hash"] = password_hash
-            st.rerun()
-        else:
-            st.error("비밀번호가 올바르지 않습니다.")
-    st.stop()
-
-
-password_gate()
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# 화면 구성
-# ──────────────────────────────────────────────────────────────────────────────
-def sidebar() -> None:
-    with st.sidebar:
-        if LOGO_PATH.exists():
-            st.image(str(LOGO_PATH), width=155)
-        st.markdown(f"### {APP_TITLE}")
-        st.caption("신사점 인플루언서 응대·방문 기록")
-        st.divider()
-        info = backend_info()
-        if info.mode == "google":
-            st.success(f"● {info.label}")
-        else:
-            st.warning(f"● {info.label}")
-        st.caption(info.detail)
-        st.divider()
-        st.markdown(
-            """
-            **직원 사용 순서**  
-            1. 이름·계정·연락처 검색  
-            2. 촬영/기프트 내용 확인  
-            3. 촬영 완료 후 직원명과 수령 여부 기록  
-            4. 검색되지 않으면 바로 신규 등록
-            """
-        )
-        if st.button("🔄 최신 데이터 불러오기", use_container_width=True):
-            safe_rerun()
-
-
-def hero() -> None:
-    logo_uri = get_logo_data_uri()
-    st.markdown(
-        f"""
-        <div class="owm-hero">
-            <img src="{logo_uri}" alt="OWM logo">
-            <div>
-                <h1>{APP_TITLE}</h1>
-                <p>{APP_SUBTITLE} · 검색부터 촬영 완료 기록까지 한 화면에서</p>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def render_metrics(df: pd.DataFrame) -> None:
-    today_text = date.today().isoformat()
-    today_df = df[df["협찬일"] == today_text] if not df.empty else df
-    completed = int((df["진행상태"] == "촬영 완료").sum()) if not df.empty else 0
-    pending = int(df["진행상태"].isin(["방문 예정", "촬영 진행"]).sum()) if not df.empty else 0
-    gift_pending = int(((df["진행상태"] == "촬영 완료") & (~df["기프트 수령"].map(to_bool))).sum()) if not df.empty else 0
-    cols = st.columns(4)
-    cols[0].metric("오늘 방문", f"{len(today_df)}명")
-    cols[1].metric("진행 중·예정", f"{pending}건")
-    cols[2].metric("촬영 완료", f"{completed}건")
-    cols[3].metric("기프트 미확인", f"{gift_pending}건")
-
-
-def record_label(row: pd.Series) -> str:
-    account = clean_text(row.get("계정주소"))
-    short_account = account.replace("https://www.instagram.com/", "").rstrip("/")
-    return f"{clean_text(row.get('협찬일')) or '날짜 미정'} | {clean_text(row.get('방문자명')) or '이름 없음'} | {short_account or '계정 없음'} | {clean_text(row.get('진행상태'))}"
-
-
-def record_card(row: pd.Series) -> None:
-    href = account_href(row.get("계정주소", ""))
-    account_html = (
-        f'<a class="owm-link" href="{href}" target="_blank">{clean_text(row.get("계정주소"))}</a>'
-        if href
-        else clean_text(row.get("계정주소")) or "계정 미입력"
-    )
-    gift_received = "수령 완료" if to_bool(row.get("기프트 수령")) else "미확인"
-    st.markdown(
-        f"""
-        <div class="owm-card">
-            <div class="owm-result-title">{clean_text(row.get('방문자명')) or '이름 미입력'}</div>
-            <div class="owm-muted">{account_html}</div>
-            <div style="margin-top:12px">
-                <span class="owm-pill">{clean_text(row.get('진행상태'))}</span>
-                <span class="owm-pill">{clean_text(row.get('협찬일')) or '날짜 미정'} {clean_text(row.get('방문 시간'))}</span>
-                <span class="owm-pill">{clean_text(row.get('국가')) or '국가 미입력'}</span>
-                <span class="owm-pill">기프트 {gift_received}</span>
-            </div>
-            <hr style="border:0;border-top:1px solid #eee5df;margin:15px 0">
-            <p><b>촬영 유형/가이드</b> · {clean_text(row.get('촬영 유형/가이드')) or '-'}</p>
-            <p><b>기프트</b> · {clean_text(row.get('기프트')) or '-'}</p>
-            <p><b>유료금액</b> · {format_money(row.get('유료금액'))}</p>
-            <p><b>연락처</b> · {clean_text(row.get('연락처')) or '-'}</p>
-            <p><b>응대직원</b> · {clean_text(row.get('응대직원')) or '-'}</p>
-            <p><b>비고</b> · {clean_text(row.get('비고')) or '-'}</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def build_record(
-    sponsor_date: date,
-    visit_time: time,
-    country: str,
-    account: str,
-    visitor_name: str,
-    contact: str,
-    shoot_type: str,
-    gift: str,
-    paid_amount: int,
-    note: str,
-    gift_received: bool,
-    staff: str,
-    status: str,
-    source: str,
-    record_id: str | None = None,
-    created_at: str | None = None,
-) -> dict[str, Any]:
-    timestamp = now_text()
-    return {
-        "record_id": record_id or make_record_id(),
-        "협찬일": sponsor_date.isoformat(),
-        "방문 시간": visit_time.strftime("%H:%M"),
-        "국가": country,
-        "계정주소": clean_text(account),
-        "방문자명": clean_text(visitor_name),
-        "연락처": clean_text(contact),
-        "촬영 유형/가이드": clean_text(shoot_type),
-        "기프트": clean_text(gift),
-        "유료금액": int(paid_amount or 0),
-        "비고": clean_text(note),
-        "기프트 수령": bool(gift_received),
-        "응대직원": clean_text(staff),
-        "진행상태": status,
-        "등록경로": source,
-        "등록일시": created_at or timestamp,
-        "최종수정일시": timestamp,
+def truthy(value: Any) -> bool:
+    return str(value).strip().lower() in {
+        "true",
+        "1",
+        "yes",
+        "y",
+        "o",
+        "예",
+        "완료",
+        "⭕",
+        "checked",
     }
 
 
-def quick_response_tab(df: pd.DataFrame) -> None:
-    st.subheader("🔎 방문자 통합 검색")
-    st.caption("기존 명단·카톡 공지·현장 신규 기록을 한 데이터에서 검색합니다.")
-    query = st.text_input(
-        "이름, 인스타그램 계정, 연락처 검색",
-        placeholder="예: @account / 방문자 이름 / 010-0000-0000",
-        key="main_search",
-    ).strip()
+def date_key(value: str) -> str:
+    text = str(value).strip()
+    if not text:
+        return ""
 
-    if query:
-        lowered = query.lower()
-        mask = pd.Series(False, index=df.index)
-        for column in ["방문자명", "계정주소", "연락처", "국가", "비고"]:
-            mask = mask | df[column].astype(str).str.lower().str.contains(re.escape(lowered), na=False)
-        results = df[mask].copy()
-        st.write(f"검색 결과 **{len(results)}건**")
-    else:
-        today_text = date.today().isoformat()
-        results = df[df["협찬일"] == today_text].copy()
-        st.write(f"오늘 방문 예정·기록 **{len(results)}건**")
+    text = text.replace("년", "-").replace("월", "-").replace("일", "")
+    text = re.sub(r"[./]", "-", text)
+    text = re.sub(r"\s+", "", text)
 
-    if not results.empty:
-        results = results.sort_values(["협찬일", "방문 시간"], ascending=[False, True])
-        options = {record_label(row): row["record_id"] for _, row in results.iterrows()}
-        selected_label = st.selectbox("확인할 방문자", list(options.keys()), key="response_selection")
-        selected_id = options[selected_label]
-        row = df[df["record_id"] == selected_id].iloc[0]
-        record_card(row)
+    parsed = pd.to_datetime(text, errors="coerce")
+    if pd.isna(parsed):
+        return ""
 
-        c1, c2, c3 = st.columns([1, 1, 1.4])
-        if c1.button("🎬 촬영 시작", type="primary", use_container_width=True, disabled=row["진행상태"] == "촬영 진행"):
-            updated = row.to_dict()
-            updated["진행상태"] = "촬영 진행"
-            updated["최종수정일시"] = now_text()
-            update_record(selected_id, updated)
-            st.success("촬영 진행 상태로 변경했습니다.")
-            safe_rerun()
+    return parsed.strftime("%Y-%m-%d")
 
-        with c2.popover("✅ 촬영 완료"):
-            with st.form(f"complete_{selected_id}"):
-                staff = st.text_input("응대직원", value=clean_text(row["응대직원"]), placeholder="예: 희선")
-                gift_received = st.checkbox("기프트 수령 확인", value=to_bool(row["기프트 수령"]))
-                extra_note = st.text_area("추가 메모", value=clean_text(row["비고"]), height=100)
-                complete = st.form_submit_button("완료 기록 저장", type="primary", use_container_width=True)
-            if complete:
-                if not staff:
-                    st.error("응대직원 이름을 입력해주세요.")
-                else:
-                    updated = row.to_dict()
-                    updated["진행상태"] = "촬영 완료"
-                    updated["기프트 수령"] = gift_received
-                    updated["응대직원"] = staff
-                    updated["비고"] = extra_note
-                    updated["최종수정일시"] = now_text()
-                    update_record(selected_id, updated)
-                    st.success("촬영 완료 기록을 저장했습니다.")
-                    safe_rerun()
 
-        if c3.button("✏️ 전체 관리에서 수정", use_container_width=True):
-            st.session_state["manage_selected_id"] = selected_id
-            st.info("위의 ‘전체 관리’ 탭에서 선택된 기록을 수정할 수 있습니다.")
-    else:
-        st.info("검색되는 방문자가 없습니다. 아래 버튼으로 바로 신규 등록할 수 있습니다.")
-        if st.button("➕ 이 방문자 신규 등록", type="primary"):
-            st.session_state["new_prefill"] = query
-            st.session_state["open_new_hint"] = True
-            st.success("‘신규 등록’ 탭에 검색어를 미리 입력해두었습니다.")
+def format_money(value: str) -> str:
+    text = str(value).strip().replace(",", "").replace("₩", "").replace("원", "")
+    if not text:
+        return "-"
 
-    st.divider()
-    st.subheader("📅 오늘 일정")
-    today_text = date.today().isoformat()
-    today_df = df[df["협찬일"] == today_text].sort_values("방문 시간")
-    if today_df.empty:
-        st.caption("오늘 등록된 일정이 없습니다.")
-    else:
-        st.dataframe(
-            dataframe_for_display(today_df),
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "계정주소": st.column_config.LinkColumn("계정주소", display_text=r"https?://(?:www\.)?instagram\.com/(.*?)/?"),
-            },
+    try:
+        return f"₩{int(float(text)):,}"
+    except ValueError:
+        return html.escape(str(value))
+
+
+def safe(value: Any, fallback: str = "-") -> str:
+    text = str(value).strip() if value is not None else ""
+    return html.escape(text or fallback)
+
+
+def update_sheet_response(
+    sheet_row: int,
+    staff_name: str,
+    gift_received: bool,
+    response_note: str,
+) -> None:
+    worksheet = get_worksheet()
+    if worksheet is None:
+        raise RuntimeError("Google Sheets가 연결되지 않았습니다.")
+
+    headers = ensure_response_columns(worksheet)
+    timestamp = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
+
+    updates = {
+        "기프트 수령": "TRUE" if gift_received else "FALSE",
+        "응대 완료": "TRUE",
+        "응대직원": staff_name.strip(),
+        "응대일시": timestamp,
+        "응대메모": response_note.strip(),
+    }
+
+    for header, value in updates.items():
+        column_index = headers.index(header) + 1
+        worksheet.update_cell(int(sheet_row), column_index, value)
+
+    load_sheet_records.clear()
+
+
+def update_preview_response(
+    sheet_row: int,
+    staff_name: str,
+    gift_received: bool,
+    response_note: str,
+) -> None:
+    frame = st.session_state.preview_df.copy()
+    mask = frame["_sheet_row"].astype(int) == int(sheet_row)
+
+    frame.loc[mask, "기프트 수령"] = "TRUE" if gift_received else "FALSE"
+    frame.loc[mask, "응대 완료"] = "TRUE"
+    frame.loc[mask, "응대직원"] = staff_name.strip()
+    frame.loc[mask, "응대일시"] = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
+    frame.loc[mask, "응대메모"] = response_note.strip()
+
+    st.session_state.preview_df = frame
+
+
+# ─────────────────────────────────────────────────────────────
+# 응대 완료 모달
+# ─────────────────────────────────────────────────────────────
+@st.dialog("응대 완료", width="small")
+def response_dialog(
+    sheet_row: int,
+    visitor_name: str,
+    live_mode: bool,
+) -> None:
+    st.markdown(
+        f"**{html.escape(visitor_name)}** 님의 응대 완료 기록을 남깁니다."
+    )
+
+    with st.form(f"response_form_{sheet_row}", clear_on_submit=False):
+        staff_name = st.text_input(
+            "응대직원",
+            placeholder="응대한 직원 이름",
         )
-
-
-def new_record_tab() -> None:
-    st.subheader("➕ 신규 방문·협찬 등록")
-    st.caption("명단에 없거나 카톡으로만 공지된 방문자는 여기에서 바로 등록합니다.")
-    prefill = clean_text(st.session_state.get("new_prefill", ""))
-    account_prefill = prefill if "instagram" in prefill.lower() or prefill.startswith("@") else ""
-    name_prefill = "" if account_prefill else prefill
-
-    with st.form("new_record_form", clear_on_submit=True):
-        col1, col2, col3 = st.columns(3)
-        sponsor_date = col1.date_input("협찬일 *", value=date.today())
-        visit_time = col2.time_input("방문 시간 *", value=datetime.now().time().replace(second=0, microsecond=0))
-        country = col3.selectbox("국가", COUNTRY_OPTIONS)
-
-        col1, col2, col3 = st.columns(3)
-        visitor_name = col1.text_input("방문자명 *", value=name_prefill)
-        account = col2.text_input("계정주소", value=account_prefill, placeholder="https://www.instagram.com/...")
-        contact = col3.text_input("연락처", placeholder="010-0000-0000")
-
-        col1, col2 = st.columns(2)
-        shoot_type = col1.text_input("촬영 유형/가이드", placeholder="예: 에피메리 X OWM 유가 / 릴스 1건")
-        gift = col2.text_input("기프트", placeholder="예: REJU-ECTO, JUVE-ECTO")
-
-        col1, col2, col3 = st.columns(3)
-        paid_amount = col1.number_input("유료금액", min_value=0, step=50000, format="%d")
-        status = col2.selectbox("진행상태", STATUS_OPTIONS)
-        source = col3.selectbox("등록경로", SOURCE_OPTIONS, index=2)
-
-        col1, col2 = st.columns(2)
-        staff = col1.text_input("응대직원", placeholder="방문 전이면 비워도 됩니다")
-        gift_received = col2.checkbox("기프트 수령 완료")
-        note = st.text_area("비고", placeholder="추가 약속, 피부과 경험, 요청사항 등", height=100)
-        submitted = st.form_submit_button("신규 기록 저장", type="primary", use_container_width=True)
+        gift_received = st.checkbox(
+            "기프트 수령 완료",
+            value=True,
+        )
+        response_note = st.text_area(
+            "응대 메모",
+            placeholder="전달사항이 있을 때만 입력하세요.",
+            height=90,
+        )
+        submitted = st.form_submit_button(
+            "응대 완료 저장",
+            type="primary",
+            use_container_width=True,
+        )
 
     if submitted:
-        if not visitor_name and not account:
-            st.error("방문자명 또는 계정주소 중 하나는 입력해주세요.")
-        else:
-            record = build_record(
-                sponsor_date,
-                visit_time,
-                country,
-                account,
-                visitor_name,
-                contact,
-                shoot_type,
-                gift,
-                paid_amount,
-                note,
-                gift_received,
-                staff,
-                status,
-                source,
-            )
-            add_record(record)
-            st.session_state.pop("new_prefill", None)
-            st.success("신규 기록을 저장했습니다.")
-            safe_rerun()
+        if not staff_name.strip():
+            st.error("응대직원 이름을 입력해주세요.")
+            return
+
+        try:
+            if live_mode:
+                update_sheet_response(
+                    sheet_row,
+                    staff_name,
+                    gift_received,
+                    response_note,
+                )
+            else:
+                update_preview_response(
+                    sheet_row,
+                    staff_name,
+                    gift_received,
+                    response_note,
+                )
+
+            st.toast("응대 완료로 표시했습니다.", icon="✓")
+            st.rerun()
+
+        except Exception as exc:
+            st.error(f"저장하지 못했습니다. 관리자에게 확인해주세요.\n\n{exc}")
 
 
-def manage_tab(df: pd.DataFrame) -> None:
-    st.subheader("🗂️ 전체 관리")
-    st.caption("필터로 기록을 찾고, 선택한 행을 수정하거나 삭제할 수 있습니다.")
+# ─────────────────────────────────────────────────────────────
+# 화면
+# ─────────────────────────────────────────────────────────────
+records, live_mode, connection_error = get_records()
+columns = resolve_columns(list(records.columns))
 
-    f1, f2, f3, f4 = st.columns([1.5, 1, 1, 1])
-    keyword = f1.text_input("검색", placeholder="이름·계정·연락처·비고", key="manage_search")
-    status_options = ["전체"] + STATUS_OPTIONS
-    status_filter = f2.selectbox("진행상태", status_options)
-    country_values = sorted({clean_text(x) for x in df["국가"] if clean_text(x)})
-    country_filter = f3.selectbox("국가", ["전체"] + country_values)
-    date_filter = f4.selectbox("기간", ["전체", "오늘", "향후 일정", "지난 기록"])
+today = datetime.now(KST).strftime("%Y-%m-%d")
+today_label = datetime.now(KST).strftime("%Y년 %m월 %d일")
 
-    filtered = df.copy()
-    if keyword:
-        lowered = keyword.lower()
-        mask = pd.Series(False, index=filtered.index)
-        for column in ["방문자명", "계정주소", "연락처", "비고", "기프트", "촬영 유형/가이드"]:
-            mask |= filtered[column].astype(str).str.lower().str.contains(re.escape(lowered), na=False)
-        filtered = filtered[mask]
-    if status_filter != "전체":
-        filtered = filtered[filtered["진행상태"] == status_filter]
-    if country_filter != "전체":
-        filtered = filtered[filtered["국가"] == country_filter]
-    today_text = date.today().isoformat()
-    if date_filter == "오늘":
-        filtered = filtered[filtered["협찬일"] == today_text]
-    elif date_filter == "향후 일정":
-        filtered = filtered["협찬일"] >= today_text
-    elif date_filter == "지난 기록":
-        filtered = filtered["협찬일"] < today_text
+if not records.empty and columns.get("date"):
+    today_mask = records[columns["date"]].map(date_key) == today
+else:
+    today_mask = pd.Series(False, index=records.index)
 
-    filtered = filtered.sort_values(["협찬일", "방문 시간"], ascending=[False, False])
-    st.write(f"표시 중 **{len(filtered)}건** / 전체 {len(df)}건")
-    st.dataframe(dataframe_for_display(filtered), use_container_width=True, hide_index=True, height=360)
+if not records.empty and columns.get("responded"):
+    done_mask = records[columns["responded"]].map(truthy)
+else:
+    done_mask = pd.Series(False, index=records.index)
 
-    if filtered.empty:
-        return
+today_records = records[today_mask].copy() if not records.empty else records.copy()
+today_total = int(today_mask.sum()) if len(today_mask) else 0
+today_done = int((today_mask & done_mask).sum()) if len(today_mask) else 0
+today_pending = max(today_total - today_done, 0)
 
-    options = {record_label(row): row["record_id"] for _, row in filtered.iterrows()}
-    preferred = st.session_state.pop("manage_selected_id", None)
-    default_index = 0
-    if preferred and preferred in options.values():
-        default_index = list(options.values()).index(preferred)
-    selected_label = st.selectbox("수정할 기록 선택", list(options.keys()), index=default_index, key="manage_selection")
-    selected_id = options[selected_label]
-    row = df[df["record_id"] == selected_id].iloc[0]
+connection_label = "GOOGLE SHEET CONNECTED" if live_mode else "PREVIEW MODE"
 
-    with st.expander("선택 기록 수정", expanded=True):
-        with st.form(f"edit_form_{selected_id}"):
-            parsed_date = pd.to_datetime(row["협찬일"], errors="coerce")
-            date_value = parsed_date.date() if not pd.isna(parsed_date) else date.today()
-            parsed_time = pd.to_datetime(row["방문 시간"], errors="coerce")
-            time_value = parsed_time.time().replace(second=0, microsecond=0) if not pd.isna(parsed_time) else time(12, 0)
+st.markdown(
+    f"""
+    <div class="owm-header">
+        <div class="owm-brand">
+            <div class="owm-logo-box">
+                <img src="data:image/png;base64,{LOGO_B64}" alt="OWM">
+            </div>
+            <div>
+                <div class="owm-title">Influencer Desk</div>
+                <div class="owm-subtitle">OPTIMA WELLNESS · SINSA</div>
+            </div>
+        </div>
+        <div class="owm-live">
+            <span class="owm-live-dot"></span>
+            {connection_label}
+        </div>
+    </div>
 
-            c1, c2, c3 = st.columns(3)
-            sponsor_date = c1.date_input("협찬일", value=date_value, key=f"edit_date_{selected_id}")
-            visit_time = c2.time_input("방문 시간", value=time_value, key=f"edit_time_{selected_id}")
-            current_country = clean_text(row["국가"])
-            country_choices = list(dict.fromkeys(COUNTRY_OPTIONS + ([current_country] if current_country else [])))
-            country = c3.selectbox(
-                "국가",
-                country_choices,
-                index=country_choices.index(current_country) if current_country in country_choices else 0,
-                key=f"edit_country_{selected_id}",
-            )
+    <div class="owm-hero">
+        <div class="owm-eyebrow">{today_label}</div>
+        <h1>오늘 방문자를<br>빠르게 확인하세요.</h1>
+        <p>
+            준비된 명단에서 정보를 확인한 뒤,
+            응대한 직원은 <b>응대 완료</b>만 표시하면 됩니다.
+        </p>
+    </div>
 
-            c1, c2, c3 = st.columns(3)
-            visitor_name = c1.text_input("방문자명", value=clean_text(row["방문자명"]), key=f"edit_name_{selected_id}")
-            account = c2.text_input("계정주소", value=clean_text(row["계정주소"]), key=f"edit_account_{selected_id}")
-            contact = c3.text_input("연락처", value=clean_text(row["연락처"]), key=f"edit_contact_{selected_id}")
+    <div class="owm-metric-grid">
+        <div class="owm-metric">
+            <div class="owm-metric-label">오늘 방문 예정</div>
+            <div class="owm-metric-value">{today_total}</div>
+        </div>
+        <div class="owm-metric">
+            <div class="owm-metric-label">응대 완료</div>
+            <div class="owm-metric-value">{today_done}</div>
+        </div>
+        <div class="owm-metric">
+            <div class="owm-metric-label">응대 대기</div>
+            <div class="owm-metric-value">{today_pending}</div>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
-            c1, c2 = st.columns(2)
-            shoot_type = c1.text_input("촬영 유형/가이드", value=clean_text(row["촬영 유형/가이드"]), key=f"edit_shoot_{selected_id}")
-            gift = c2.text_input("기프트", value=clean_text(row["기프트"]), key=f"edit_gift_{selected_id}")
-
-            c1, c2, c3 = st.columns(3)
-            paid_amount = c1.number_input("유료금액", min_value=0, step=50000, value=normalize_money(row["유료금액"]), key=f"edit_paid_{selected_id}")
-            current_status = clean_text(row["진행상태"]) or "방문 예정"
-            status = c2.selectbox("진행상태", STATUS_OPTIONS, index=STATUS_OPTIONS.index(current_status) if current_status in STATUS_OPTIONS else 0, key=f"edit_status_{selected_id}")
-            current_source = clean_text(row["등록경로"]) or "기타"
-            source_choices = list(dict.fromkeys(SOURCE_OPTIONS + [current_source]))
-            source = c3.selectbox("등록경로", source_choices, index=source_choices.index(current_source), key=f"edit_source_{selected_id}")
-
-            c1, c2 = st.columns(2)
-            staff = c1.text_input("응대직원", value=clean_text(row["응대직원"]), key=f"edit_staff_{selected_id}")
-            gift_received = c2.checkbox("기프트 수령 완료", value=to_bool(row["기프트 수령"]), key=f"edit_received_{selected_id}")
-            note = st.text_area("비고", value=clean_text(row["비고"]), height=100, key=f"edit_note_{selected_id}")
-
-            save = st.form_submit_button("수정사항 저장", type="primary", use_container_width=True)
-
-        if save:
-            updated = build_record(
-                sponsor_date,
-                visit_time,
-                country,
-                account,
-                visitor_name,
-                contact,
-                shoot_type,
-                gift,
-                paid_amount,
-                note,
-                gift_received,
-                staff,
-                status,
-                source,
-                record_id=selected_id,
-                created_at=clean_text(row["등록일시"]) or now_text(),
-            )
-            update_record(selected_id, updated)
-            st.success("수정사항을 저장했습니다.")
-            safe_rerun()
-
-        st.warning("삭제하면 되돌릴 수 없습니다. CSV 백업 후 삭제하는 것을 권장합니다.")
-        confirm = st.checkbox("이 기록을 삭제하는 데 동의합니다", key=f"delete_confirm_{selected_id}")
-        if st.button("🗑️ 선택 기록 삭제", disabled=not confirm, key=f"delete_button_{selected_id}"):
-            delete_record(selected_id)
-            st.success("기록을 삭제했습니다.")
-            safe_rerun()
-
-
-def data_tab(df: pd.DataFrame) -> None:
-    st.subheader("📥 기존 시트 가져오기 · 백업")
-    st.caption("기존 구글시트를 CSV로 내려받아 업로드하면 통합 관리 데이터에 추가할 수 있습니다.")
-
-    export_name = f"OWM_인플루언서_백업_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
-    st.download_button(
-        "⬇️ 전체 데이터 CSV 백업",
-        data=csv_bytes(df),
-        file_name=export_name,
-        mime="text/csv",
-        use_container_width=True,
+if connection_error:
+    st.error(
+        "Google Sheets 연결에 실패했습니다. "
+        "시트 공유 권한과 Streamlit Secrets를 확인해주세요."
     )
 
-    st.divider()
-    upload = st.file_uploader("기존 시트 CSV 업로드", type=["csv"])
-    skip_duplicates = st.checkbox("기존 데이터와 중복되는 행은 건너뛰기", value=True)
+search_query = st.text_input(
+    "방문자 검색",
+    placeholder="이름 · 인스타 계정 · 연락처로 검색",
+    label_visibility="collapsed",
+)
 
-    if upload is not None:
-        try:
-            raw = upload.getvalue()
-            try:
-                raw_df = pd.read_csv(io.BytesIO(raw), dtype=str, encoding="utf-8-sig").fillna("")
-            except UnicodeDecodeError:
-                raw_df = pd.read_csv(io.BytesIO(raw), dtype=str, encoding="cp949").fillna("")
-            imported = import_dataframe(raw_df)
-            st.write(f"가져올 수 있는 행: **{len(imported)}건**")
-            st.dataframe(dataframe_for_display(imported.head(20)), use_container_width=True, hide_index=True)
+search_query = search_query.strip().lower()
 
-            if st.button("CSV 데이터를 통합 관리에 추가", type="primary", use_container_width=True):
-                to_add = imported.copy()
-                if skip_duplicates and not df.empty:
-                    existing_keys = {
-                        (
-                            clean_text(row["협찬일"]),
-                            clean_text(row["방문자명"]).lower(),
-                            clean_text(row["계정주소"]).lower(),
-                        )
-                        for _, row in df.iterrows()
-                    }
-                    mask = []
-                    for _, row in to_add.iterrows():
-                        key = (
-                            clean_text(row["협찬일"]),
-                            clean_text(row["방문자명"]).lower(),
-                            clean_text(row["계정주소"]).lower(),
-                        )
-                        mask.append(key not in existing_keys)
-                    to_add = to_add[pd.Series(mask, index=to_add.index)]
-                add_records(to_add.to_dict("records"))
-                skipped = len(imported) - len(to_add)
-                st.success(f"{len(to_add)}건을 추가했습니다. 중복으로 건너뛴 행: {skipped}건")
-                safe_rerun()
-        except Exception as exc:
-            st.error(f"CSV를 읽지 못했습니다: {exc}")
+if search_query:
+    searchable_columns = [
+        columns.get("name"),
+        columns.get("account"),
+        columns.get("phone"),
+        columns.get("country"),
+    ]
+    searchable_columns = [col for col in searchable_columns if col]
 
-    st.divider()
-    with st.expander("CSV 열 이름 안내"):
-        st.write(
-            "협찬일, 방문 시간, 국가, 계정주소, 방문자명, 연락처, 촬영 유형/가이드, "
-            "기프트, 유료금액, 비고, 기프트 수령, 응대직원 열을 자동으로 인식합니다. "
-            "띄어쓰기나 ‘촬영 유형 선택/가이드’ 같은 기존 표기도 함께 인식합니다."
+    if searchable_columns:
+        combined = records[searchable_columns].fillna("").astype(str).agg(" ".join, axis=1)
+        display_records = records[combined.str.lower().str.contains(search_query, regex=False)].copy()
+    else:
+        display_records = records.iloc[0:0].copy()
+
+    section_title = "검색 결과"
+    section_copy = "전체 준비 명단에서 검색했습니다."
+else:
+    display_records = today_records.copy()
+    section_title = "오늘 방문"
+    section_copy = "방문 시간순으로 표시됩니다."
+
+time_column = columns.get("time")
+if time_column and time_column in display_records.columns:
+    display_records = display_records.sort_values(
+        by=time_column,
+        key=lambda series: series.fillna("99:99").astype(str),
+        ascending=True,
+    )
+
+st.markdown(
+    f"""
+    <div class="owm-section-head">
+        <div>
+            <div class="owm-section-title">{section_title}</div>
+            <div class="owm-section-copy">{section_copy}</div>
+        </div>
+        <div class="owm-count">{len(display_records)}명</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+if display_records.empty:
+    if search_query:
+        empty_title = "준비된 명단에서 찾을 수 없습니다."
+        empty_copy = "카톡 공지 또는 관리자에게 확인해주세요."
+    else:
+        empty_title = "오늘 예정된 방문이 없습니다."
+        empty_copy = "다른 날짜의 방문자는 위 검색창에서 찾을 수 있습니다."
+
+    st.markdown(
+        f"""
+        <div class="owm-empty">
+            <div class="owm-empty-mark">⌕</div>
+            <strong>{empty_title}</strong>
+            <span>{empty_copy}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+else:
+    for _, row in display_records.iterrows():
+        visitor_name = value_of(row, columns, "name") or "이름 미입력"
+        account = value_of(row, columns, "account")
+        phone = value_of(row, columns, "phone")
+        visit_date = value_of(row, columns, "date")
+        visit_time = value_of(row, columns, "time")
+        country = value_of(row, columns, "country")
+        shoot_type = value_of(row, columns, "shoot")
+        gift = value_of(row, columns, "gift")
+        amount = value_of(row, columns, "amount")
+        note = value_of(row, columns, "note")
+        staff = value_of(row, columns, "staff")
+        responded_at = value_of(row, columns, "responded_at")
+        response_note = value_of(row, columns, "response_note")
+        gift_received = truthy(value_of(row, columns, "gift_received"))
+        responded = truthy(value_of(row, columns, "responded"))
+        sheet_row = int(row["_sheet_row"])
+
+        badge_class = "done" if responded else "pending"
+        badge_text = "응대 완료" if responded else "응대 대기"
+
+        account_html = (
+            f'<a class="owm-account" href="{html.escape(account)}" target="_blank">'
+            f'{html.escape(account)}</a>'
+            if account.startswith(("http://", "https://"))
+            else f'<span class="owm-account">{safe(account, "계정주소 미입력")}</span>'
         )
 
+        with st.container(border=True):
+            st.markdown(
+                f"""
+                <div class="owm-visitor-top">
+                    <div>
+                        <div class="owm-name">{safe(visitor_name)}</div>
+                        {account_html}
+                    </div>
+                    <span class="owm-badge {badge_class}">{badge_text}</span>
+                </div>
 
-def main() -> None:
-    sidebar()
-    hero()
-    try:
-        df = ensure_unique_record_ids(load_data())
-    except StorageError as exc:
-        st.error(str(exc))
-        st.info("README.md의 Google Sheets 연결 안내와 Streamlit Secrets 설정을 확인해주세요.")
-        st.stop()
-    except Exception as exc:
-        st.error(f"데이터를 불러오는 중 오류가 발생했습니다: {exc}")
-        st.stop()
+                <div class="owm-detail-grid">
+                    <div class="owm-detail">
+                        <div class="owm-detail-label">방문 일정</div>
+                        <div class="owm-detail-value">
+                            {safe(visit_date)} · {safe(visit_time, "시간 미정")}
+                        </div>
+                    </div>
+                    <div class="owm-detail">
+                        <div class="owm-detail-label">국가</div>
+                        <div class="owm-detail-value">{safe(country)}</div>
+                    </div>
+                    <div class="owm-detail">
+                        <div class="owm-detail-label">촬영 유형 · 가이드</div>
+                        <div class="owm-detail-value">{safe(shoot_type)}</div>
+                    </div>
+                    <div class="owm-detail">
+                        <div class="owm-detail-label">기프트</div>
+                        <div class="owm-detail-value">{safe(gift)}</div>
+                    </div>
+                    <div class="owm-detail">
+                        <div class="owm-detail-label">연락처</div>
+                        <div class="owm-detail-value">{safe(phone)}</div>
+                    </div>
+                    <div class="owm-detail">
+                        <div class="owm-detail-label">유료금액</div>
+                        <div class="owm-detail-value">{format_money(amount)}</div>
+                    </div>
+                    <div class="owm-detail">
+                        <div class="owm-detail-label">기프트 수령</div>
+                        <div class="owm-detail-value">
+                            {"완료" if gift_received else "미완료"}
+                        </div>
+                    </div>
+                    <div class="owm-detail">
+                        <div class="owm-detail-label">응대직원</div>
+                        <div class="owm-detail-value">{safe(staff)}</div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
-    render_metrics(df)
-    st.write("")
-    tab_response, tab_new, tab_manage, tab_data = st.tabs(
-        ["✨ 방문 응대", "➕ 신규 등록", "🗂️ 전체 관리", "📥 CSV·백업"]
-    )
-    with tab_response:
-        quick_response_tab(df)
-    with tab_new:
-        new_record_tab()
-    with tab_manage:
-        manage_tab(df)
-    with tab_data:
-        data_tab(df)
+            if note:
+                st.markdown(
+                    f'<div class="owm-note"><b>비고</b><br>{safe(note)}</div>',
+                    unsafe_allow_html=True,
+                )
 
-    st.caption("OWM Influencer Desk · 데이터 변경 시 최종수정일시가 자동 기록됩니다.")
+            if responded:
+                completion_text = (
+                    f"{safe(staff, '직원 미입력')} · {safe(responded_at, '시간 미입력')}"
+                )
+                if response_note:
+                    completion_text += f"<br>{safe(response_note)}"
 
+                st.markdown(
+                    f"""
+                    <div class="owm-done-strip">
+                        <b>응대 완료</b><br>{completion_text}
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            else:
+                action_col, spacer_col = st.columns([1.25, 3.75])
+                with action_col:
+                    if st.button(
+                        "응대 완료",
+                        key=f"complete_{sheet_row}",
+                        type="primary",
+                        use_container_width=True,
+                    ):
+                        response_dialog(
+                            sheet_row=sheet_row,
+                            visitor_name=visitor_name,
+                            live_mode=live_mode,
+                        )
 
-if __name__ == "__main__":
-    main()
+st.markdown(
+    '<div class="owm-footer">OWM INFLUENCER DESK · STAFF USE ONLY</div>',
+    unsafe_allow_html=True,
+)
