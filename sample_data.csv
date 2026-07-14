@@ -1,0 +1,4 @@
+record_id,협찬일,방문 시간,국가,계정주소,방문자명,연락처,촬영 유형/가이드,기프트,유료금액,비고,기프트 수령,응대직원,진행상태,등록경로,등록일시,최종수정일시
+sample001,2026-07-15,10:00,영어권,https://www.instagram.com/owm_sample_a/,Sample Visitor A,010-0000-0001,에피메리 X OWM 유가,"REJU-ECTO, JUVE-ECTO",450000,샘플 데이터입니다.,FALSE,,방문 예정,기존 명단,2026-07-14 10:00:00,2026-07-14 10:00:00
+sample002,2026-07-15,14:30,일본,https://www.instagram.com/owm_sample_b/,Sample Visitor B,,에피메리 X OWM,JUVE-ECTO,0,릴스 1건 촬영 예정,FALSE,,방문 예정,카톡 공지,2026-07-14 11:00:00,2026-07-14 11:00:00
+sample003,2026-07-14,16:00,대만,https://www.instagram.com/owm_sample_c/,Sample Visitor C,010-0000-0003,레비온 X OWM 캠페인,레비온 PDRN 크림,150000,촬영 완료 샘플,TRUE,희선,촬영 완료,현장 신규,2026-07-13 09:00:00,2026-07-14 17:00:00
